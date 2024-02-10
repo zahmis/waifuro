@@ -1,0 +1,33 @@
+{
+  "folders": [
+	{
+		"path": "../../lck-rsp-pico-w"
+	},
+	{
+		"name": "waiFuro",
+		"path": "../../waiFuro"
+	},
+	{
+		"name": "waiFuro uno r4",
+		"path": "../../waiFuro uno r4"
+	},
+	{
+		"name": "waihuro uno r4 wifi",
+		"path": "../../waihuro uno r4 wifi"
+	}
+],
+  "settings": {
+    "files.associations": {
+      "array": "cpp",
+      "deque": "cpp",
+      "forward_list": "cpp",
+      "list": "cpp",
+      "string": "cpp",
+      "unordered_map": "cpp",
+      "unordered_set": "cpp",
+      "vector": "cpp",
+      "string_view": "cpp",
+      "initializer_list": "cpp"
+    }
+  }
+}
