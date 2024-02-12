@@ -28,23 +28,15 @@ void setup() {
   sensors.setResolution(SENSER_BIT);
 }
 
-// HTTPリクエストの共通部分を関数化
-void sendHTTPRequest(String host, String request) {
-  wifiClient.println(request);
-  wifiClient.println("Host: " + host);
-  wifiClient.println("Content-Type: application/json; charset=utf-8");
-  wifiClient.println("Authorization: Bearer " SWICTH_BOT_TOKEN);
-  wifiClient.println();  // ヘッダーの終了を示す空行
-}
-
 void sendToSlack(String message) {
   if (!wifiClient.connect("hooks.slack.com", 443)) {
     Serial.println("Slack Connection failed");
     return;
   }
-
-  Serial.println("Connected to slack server");
-  sendHTTPRequest("hooks.slack.com", "POST " SLACK_WEBHOOK_PATH " HTTP/1.1");
+  Serial.println("Connected to slack.");
+  wifiClient.println("POST " SLACK_WEBHOOK_PATH " HTTP/1.1");
+  wifiClient.println("Host: hooks.slack.com");
+  wifiClient.println("Content-Type: application/json");
   wifiClient.println("Content-Length: " + String(message.length()));
   wifiClient.println();
   wifiClient.println(message);
@@ -52,10 +44,29 @@ void sendToSlack(String message) {
   wifiClient.stop();
 }
 
-String getDeviceStatus() {
-  sendHTTPRequest("api.switch-bot.com",
-                  "GET /v1.0/devices/" DEVICE_ID "/status HTTP/1.1");
+void sendToSwitchBot() {
+  if (!wifiClient.connect("api.switch-bot.com", 443)) {
+    Serial.println("Switch bot Connection failed");
+    return;
+  }
+  Serial.println("Connected to switch bot.");
 
+  wifiClient.println("POST /v1.0/devices/" DEVICE_ID "/commands HTTP/1.1");
+  wifiClient.println("Host: api.switch-bot.com");
+  wifiClient.println("Content-Type: application/json");
+  wifiClient.println("Authorization: Bearer " SWICTH_BOT_TOKEN);
+  String messageS =
+      "{\"command\":\"turnOff\",\"parameter\":\"default\",\"commandType\":"
+      "\"command\"}";
+  wifiClient.println("Content-Length: " + String(messageS.length()));
+  wifiClient.println();
+  wifiClient.println(messageS);
+  wifiClient.stop();
+
+  Serial.println("Message sent to switch bot.");
+}
+
+String getDeviceStatus() {
   while (wifiClient.connected()) {
     String line = wifiClient.readStringUntil('\n');
     if (line == "\r") {
@@ -74,30 +85,6 @@ String getDeviceStatus() {
   return status;
 }
 
-void sendToSwitchBot() {
-  if (!wifiClient.connect("api.switch-bot.com", 443)) {
-    Serial.println("Connection failed");
-    return;
-  }
-  Serial.println("Connected to server");
-  String status = getDeviceStatus();
-
-  if (status == "off") {
-    Serial.println("Already turned off.");
-  } else {
-    sendHTTPRequest("api.switch-bot.com",
-                    "POST /v1.0/devices/" DEVICE_ID "/commands HTTP/1.1");
-    String messageS =
-        "{\"command\":\"turnOff\",\"parameter\":\"default\",\"commandType\":"
-        "\"command\"}";
-    wifiClient.println("Content-Length: " + String(messageS.length()));
-    wifiClient.println();
-    wifiClient.println(messageS);
-    Serial.println("Message sent to switch bot.");
-    wifiClient.stop();
-  }
-}
-
 void loop() {
   sensors.requestTemperatures();
   float f = sensors.getTempCByIndex(0);
@@ -106,8 +93,16 @@ void loop() {
     Serial.println("高温注意");
     if (WiFi.status() == WL_CONNECTED) {
       sendToSlack("{\"text\":\"現在温度: " + String(f) + "℃\"}");
-      sendToSwitchBot();
-      sendToSlack("{\"text\":\":warning: 追い焚きを中止しました:warning: \"}");
+
+      String status = getDeviceStatus();
+
+      if (status == "on") {
+        sendToSwitchBot();
+        sendToSlack(
+            "{\"text\":\":warning: 追い焚きを中止しました:warning: \"}");
+      } else {
+        Serial.println("Already turned off.");
+      }
     } else {
       Serial.println("WiFi is not connected");
     }
