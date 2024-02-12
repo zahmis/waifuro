@@ -1,4 +1,5 @@
 #include <ArduinoHttpClient.h>
+#include <ArduinoJson.h>
 #include <DallasTemperature.h>
 #include <OneWire.h>
 #include <WiFiS3.h>
@@ -33,7 +34,7 @@ void sendToSlack(String message) {
     Serial.println("Slack Connection failed");
     return;
   }
-  Serial.println("Connected to server");
+  Serial.println("Connected to slack server");
   wifiClient.println("POST " SLACK_WEBHOOK_PATH " HTTP/1.1");
   wifiClient.println("Host: hooks.slack.com");
   wifiClient.println("Content-Type: application/json");
@@ -50,33 +51,65 @@ void sendToSwitchBot() {
     return;
   }
   Serial.println("Connected to server");
-  wifiClient.println("POST /v1.0/devices/" DEVICE_ID "/commands HTTP/1.1");
+
+  // post する前に今のプラグの状態を取得する
+  wifiClient.println("GET http://api.switch-bot.com/v1.0/devices/" DEVICE_ID
+                     "/status"
+                     " HTTP/1.1");
   wifiClient.println("Host: api.switch-bot.com");
-  wifiClient.println("Content-Type: application/json");
+  wifiClient.println("Content-Type: application/json; charaset=utf-8");
   wifiClient.println("Authorization: Bearer " SWICTH_BOT_TOKEN);
-  String messageS =
-      "{\"command\":\"turnOff\",\"parameter\":\"default\",\"commandType\":"
-      "\"command\"}";
-  wifiClient.println("Content-Length: " + String(messageS.length()));
   wifiClient.println();
-  wifiClient.println(messageS);
-  Serial.println("Message sent to switch bot.");
-  wifiClient.stop();
+
+  while (wifiClient.connected()) {
+    String line = wifiClient.readStringUntil('\n');
+    if (line == "\r") {
+      break;
+    }
+  }
+
+  String jsonResponse = wifiClient.readStringUntil('\n');
+  Serial.println(jsonResponse);
+
+  DynamicJsonDocument doc(1024);
+  deserializeJson(doc, jsonResponse);
+
+  // デバイスの状態を取得
+  String power = doc["body"]["power"];
+  Serial.println("power: " + power);
+
+  if (power == "off") {
+    Serial.println("Already turned off.");
+  } else {
+    wifiClient.println("POST /v1.0/devices/" DEVICE_ID "/commands HTTP/1.1");
+    wifiClient.println("Host: api.switch-bot.com");
+    wifiClient.println("Content-Type: application/json");
+    wifiClient.println("Authorization: Bearer " SWICTH_BOT_TOKEN);
+    String messageS =
+        "{\"command\":\"turnOff\",\"parameter\":\"default\",\"commandType\":"
+        "\"command\"}";
+    wifiClient.println("Content-Length: " + String(messageS.length()));
+    wifiClient.println();
+    wifiClient.println(messageS);
+    Serial.println("Message sent to switch bot.");
+    wifiClient.stop();
+  }
 }
 
 void loop() {
   sensors.requestTemperatures();
   float f = sensors.getTempCByIndex(0);
   Serial.println(String(f));
-  if (f > 40) {
+  if (f > 10) {
     Serial.println("高温注意");
     if (WiFi.status() == WL_CONNECTED) {
-      sendToSlack("{\"text\":\"Too hot! " + String(f) + "℃\"}");
+      sendToSlack("{\"text\":\"現在温度: " + String(f) + "℃\"}");
       sendToSwitchBot();
-      sendToSlack("{\"text\":\":warning: 追い焚きを中止しました :warning:\"}");
+      sendToSlack("{\"text\":\":warning: 追い焚きを中止しました:warning: \"}");
+
     } else {
       Serial.println("WiFi is not connected");
     }
   }
-  delay(5000);
+  delay(1000);
 }
