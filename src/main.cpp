@@ -5,13 +5,22 @@
 #include <WiFiS3.h>
 #include <WiFiSSLClient.h>
 
+#include "Arduino_LED_Matrix.h"
 #include "arduino_secrets.h"
+#include "fonts.h"
+
 #define ONE_WIRE_BUS 2  // DATA
 #define SENSER_BIT 1    // 精度
 
 WiFiSSLClient wifiClient;
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
+ArduinoLEDMatrix matrix;
+uint8_t frame[8][12] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
 
 void connectToWiFi() {
   WiFi.begin(WIFISSID, PASSWORD);
@@ -26,6 +35,7 @@ void setup() {
   Serial.begin(9600);
   connectToWiFi();
   sensors.setResolution(SENSER_BIT);
+  matrix.begin();
 }
 
 void sendToSlack(String message) {
@@ -67,34 +77,77 @@ void sendToSwitchBot() {
 }
 
 String getDeviceStatus() {
+  wifiClient.connect("api.switch-bot.com", 443);
+  wifiClient.println("GET /v1.0/devices/" DEVICE_ID "/status HTTP/1.1");
+  wifiClient.println("Host: api.switch-bot.com");
+  wifiClient.println("Authorization : Bearer " SWICTH_BOT_TOKEN);
+  wifiClient.println();
+
+  // Skip HTTP headers　bodyも読み込む
   while (wifiClient.connected()) {
     String line = wifiClient.readStringUntil('\n');
     if (line == "\r") {
       break;
     }
   }
+
+  // Read the body
   String jsonResponse = wifiClient.readStringUntil('\n');
+  wifiClient.stop();
+  Serial.println("Response from SwitchBot API:");
   Serial.println(jsonResponse);
 
   // JSONをパース
   DynamicJsonDocument doc(1024);
   deserializeJson(doc, jsonResponse);
-
-  // デバイスの状態を取得（デバイスの状態はdeviceStateというキーに格納されていると仮定）
+  // デバイスの状態を取得
   String status = doc["body"]["power"];
   return status;
+}
+
+void clear_frame() {
+  for (int row = 0; row < 8; row++) {
+    for (int col = 0; col < 12; col++) {
+      frame[row][col] = 0;
+    }
+  }
+}
+
+void display_frame() { matrix.renderBitmap(frame, 8, 12); }
+
+void add_to_frame(int index, int pos) {
+  for (int row = 0; row < 8; row++) {
+    uint32_t temp = fonts[index][row] << (7 - pos);
+    for (int col = 0; col < 12; col++) {
+      frame[row][col] |= (temp >> (11 - col)) & 1;
+    }
+  }
 }
 
 void loop() {
   sensors.requestTemperatures();
   float f = sensors.getTempCByIndex(0);
+
+  int th, tz;
+  th = f / 10;
+  tz = (int)f % 10;
+
+  clear_frame();
+  add_to_frame(th, -1);
+  add_to_frame(tz, 3);
+  add_to_frame(10, 6);
+  // add_to_frame(11, 7);
+
+  display_frame();
+
   Serial.println(String(f));
+  Serial.println(String(th));
   if (f > 50) {
     Serial.println("高温注意");
+    String status = getDeviceStatus();
+    Serial.println(status);
     if (WiFi.status() == WL_CONNECTED) {
       sendToSlack("{\"text\":\"現在温度: " + String(f) + "℃\"}");
-
-      String status = getDeviceStatus();
 
       if (status == "on") {
         sendToSwitchBot();
